@@ -94,6 +94,8 @@ class AppStateModel extends Model {
 
   // Loads the list of available products from the repo.
   void loadProducts() {
+
+
     _availableProducts = ProductsRepository.loadProducts(Category.all);
     notifyListeners();
   }

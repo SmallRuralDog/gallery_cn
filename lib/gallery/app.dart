@@ -1,33 +1,147 @@
+import 'dart:async';
+
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show timeDilation;
 import 'package:gallery_cn/demo/shrine/model/app_state_model.dart';
+import 'package:gallery_cn/gallery/scales.dart';
+import 'package:gallery_cn/gallery/themes.dart';
 import 'package:scoped_model/scoped_model.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import 'home.dart';
+import 'options.dart';
+import 'updater.dart';
 
 class GalleryApp extends StatefulWidget {
-  const GalleryApp({Key key}) : super(key: key);
+  const GalleryApp(
+      {Key key,
+      this.updateUrlFetcher,
+      this.enablePerformanceOverlay,
+      this.enableRasterCacheImagesCheckerboard,
+      this.enableOffscreenLayersCheckerboard,
+      this.onSendFeedback,
+      this.testMode})
+      : super(key: key);
+
+  final UpdateUrlFetcher updateUrlFetcher;
+  final bool enablePerformanceOverlay;
+  final bool enableRasterCacheImagesCheckerboard;
+  final bool enableOffscreenLayersCheckerboard;
+  final VoidCallback onSendFeedback;
+  final bool testMode;
 
   @override
   State<StatefulWidget> createState() => _GalleryAppState();
 }
 
 class _GalleryAppState extends State<GalleryApp> {
+  GalleryOptions _options;
+  Timer _timeDilationTimer;
   AppStateModel model;
 
   @override
   void initState() {
     super.initState();
+    _options = GalleryOptions(
+      theme: kLightGalleryTheme,
+      textScaleFactor: kAllGalleryTextScaleValues[0],
+      timeDilation: timeDilation,
+      platform: defaultTargetPlatform,
+    );
     model = AppStateModel()..loadProducts();
   }
 
   @override
+  void dispose() {
+    _timeDilationTimer?.cancel();
+    _timeDilationTimer = null;
+    super.dispose();
+  }
+
+  void _handleOptionsChanged(GalleryOptions newOptions) {
+    setState(() {
+      if (_options.timeDilation != newOptions.timeDilation) {
+        _timeDilationTimer?.cancel();
+        _timeDilationTimer = null;
+        if (newOptions.timeDilation > 1.0) {
+          // We delay the time dilation change long enough that the user can see
+          // that UI has started reacting and then we slam on the brakes so that
+          // they see that the time is in fact now dilated.
+          _timeDilationTimer = Timer(const Duration(milliseconds: 150), () {
+            timeDilation = newOptions.timeDilation;
+          });
+        } else {
+          timeDilation = newOptions.timeDilation;
+        }
+      }
+
+      _options = newOptions;
+    });
+  }
+
+  Widget _applyTextScaleFactor(Widget child) {
+    return Builder(
+      builder: (BuildContext context) {
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaleFactor: _options.textScaleFactor.scale,
+          ),
+          child: child,
+        );
+      },
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    Widget home = Text("123");
+    Widget home = GalleryHome(
+      testMode: widget.testMode,
+      optionsPage: GalleryOptionsPage(
+        options: _options,
+        onOptionsChanged: _handleOptionsChanged,
+        onSendFeedback: widget.onSendFeedback ??
+            () {
+              launch('https://github.com/flutter/flutter/issues/new/choose',
+                  forceSafariVC: false);
+            },
+      ),
+    );
+
+    if (widget.updateUrlFetcher != null) {
+      home = Updater(
+        updateUrlFetcher: widget.updateUrlFetcher,
+        child: home,
+      );
+    }
 
     return ScopedModel<AppStateModel>(
       model: model,
       child: MaterialApp(
+        theme: _options.theme.data.copyWith(platform: _options.platform),
         title: 'Flutter Gallery',
         color: Colors.grey,
-        builder: (BuildContext context, Widget child) {},
+        showPerformanceOverlay: _options.showPerformanceOverlay,
+        checkerboardOffscreenLayers: _options.showOffscreenLayersCheckerboard,
+        checkerboardRasterCacheImages: _options.showRasterCacheImagesCheckerboard,
+        //routes: _buildRoutes(),
+        builder: (BuildContext context, Widget child) {
+          return Directionality(
+            textDirection: _options.textDirection,
+            child: _applyTextScaleFactor(
+              // Specifically use a blank Cupertino theme here and do not transfer
+              // over the Material primary color etc except the brightness to
+              // showcase standard iOS looks.
+              CupertinoTheme(
+                data: CupertinoThemeData(
+                  brightness: _options.theme.data.brightness,
+                ),
+                child: child,
+              ),
+            ),
+          );
+        },
         home: home,
       ),
     );
