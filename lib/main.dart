@@ -1,3 +1,7 @@
 import 'package:flutter/material.dart';
 
-void main() {}
+import 'gallery/app.dart';
+
+void main() {
+  runApp(const GalleryApp());
+}
